@@ -1,0 +1,10 @@
+name: myshinyapp
+title:
+username: triutami
+account: triutami
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 17565902
+bundleId: 12198980
+url: https://triutami.shinyapps.io/myshinyapp/
+version: 1
