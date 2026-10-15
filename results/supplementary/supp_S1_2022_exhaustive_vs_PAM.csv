@@ -1,0 +1,5 @@
+"k","PAM_SC","global_SC","n_optimal_sets","sizes","partition"
+2,0.407909690911042,0.525237862192531,7,"1-33","DKI JAKARTA | 33 provinces"
+3,0.401874105735772,0.417070179705058,29,"2-12-20","DKI JAKARTA + BANTEN | 12 provinces | 20 provinces"
+4,0.31137740735017,0.423027190250652,103,"4-5-12-13","4 provinces | 5 provinces | 12 provinces | 13 provinces"
+5,0.307357569049612,0.413985769420174,103,"1-3-5-12-13","DKI JAKARTA | JAWA BARAT + JAWA TENGAH + BANTEN | 5 provinces | 12 provinces | 13 provinces"
