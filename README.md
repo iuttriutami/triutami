@@ -12,20 +12,28 @@ Code, data and results for the manuscript *“Metaheuristic-Optimized K-Medoids 
 | `R/CommIT_16202_S1_EQI2022.R` | Supplementary S1: replication of the full protocol on EQI 2022 (34 provinces) |
 | `R/CommIT_16202_S2_Moran.R` | Supplementary S2: global Moran’s I of the 2023 components (k-nearest-neighbour weights, 9,999 permutations) |
 | `data/` | BPS tables *Komponen Penyusun Indeks Kualitas Lingkungan Hidup Menurut Provinsi* (2022 and 2023) |
-| `results/main/` | CSV outputs of the main pipeline (E0–E8, Tables 2 and 4) |
+| `results/main/` | CSV outputs of the main pipeline (E0–E8, Tables 2 and 4); these are the outputs behind every number in the manuscript |
+| `results/reproducibility_check.csv` | File-by-file comparison with a second, independent run: identical except wall-clock runtimes |
 | `results/supplementary/` | CSV outputs of S1 (EQI 2022) and S2 (Moran’s I) |
 | `figures/` | Figures used in the manuscript (PNG) |
 | `shiny/app.R` | Interactive R Shiny decision-support application (English interface) |
+| `shiny/check_shiny_decoding.R` | Test that every optimizer in the app returns the medoid set that produced the reported Silhouette |
 
 ## How to reproduce
 
 1. Install R ≥ 4.4 and the packages `cluster`, `GA`, `pso`, `clusterCrit`, `ggplot2`, `sf`, `spdep`.
-2. Edit the paths at the top of each script (`PATH_CSV`, `PATH_SHP`, `PATH_XY`) to point to `data/`, or run the scripts on Kaggle with the data under `/kaggle/input`.
+2. Set the input paths at the top of each script, or run the scripts on Kaggle with the inputs under `/kaggle/input` (they are then found automatically):
+   - `PATH_CSV` – the BPS table in `data/` (2023 for the main script and S2, 2022 for S1).
+   - `PATH_SHP` – a province boundary shapefile of Indonesia with **38 provinces** (2022 division; a 34-province file also works, the four new Papua provinces are then merged into their parent provinces). Used only for the map (Fig. 3). The run reported in the paper used the Kaggle input `shapefile-indo`. Province names are matched to the BPS names strictly; if any name does not match, the script writes `E10_map_name_matching_report.csv` and skips the map, all other results are unaffected.
+   - `PATH_XY` – used only by the S2 Moran’s I script: a table of regency/city centroids with the columns `PROV_2024`, `X_Centroid` (longitude) and `Y_Centroid` (latitude) (Kaggle input `xy-centroid`). The province location is the mean of the centroids of its regencies and cities. The resulting 38 province coordinates are distributed in `results/supplementary/supp_S2_coordinates.csv`; when the centroid file is not available, the S2 script uses this file directly, so Moran’s I can be reproduced from the repository alone.
 3. Run `R/CommIT_16202_Revision_Experiments.R` (about 40 minutes on a Kaggle CPU notebook), then the S1 and S2 scripts.
 
 Every run of every optimizer uses seed 42 + r (r = 1, …, 30). The fitness is the mean Silhouette with nearest-medoid assignment; its vectorized implementation is checked against `cluster::silhouette` before any experiment runs. Silhouette values are rounded to 10 decimal places before the Friedman and Wilcoxon tests, so that equivalent medoid sets are treated as ties.
 
 ## Run the Shiny app locally
+
+The app uses the same preprocessing, decoder and optimizers as the benchmarking script and stores each medoid set together with the Silhouette it produced (no re-decoding of the final solution). `Rscript shiny/check_shiny_decoding.R` verifies this on the 2023 data.
+
 
 ```r
 install.packages(c("shiny", "shinydashboard", "DT", "ggplot2", "cluster", "GA", "pso", "clusterCrit", "dplyr", "tidyr"))

@@ -47,9 +47,29 @@ extra_indices <- function(XMAT, labels) {
   }, error = function(e) c(DB = NA, CH = NA))
 }
 
-fitness_sil <- function(sol, k, n, DMAT, DIST, maximize = TRUE) {
-  s <- sil_of_medoids(DMAT, DIST, decode_medoid(sol, k, n))$sil
-  if (maximize) s else -s
+# Every candidate is decoded exactly once, and the medoid set is stored together with the
+# Silhouette it produced. The decoder repairs duplicates at random, so decoding the final
+# continuous solution a second time could return a different medoid set from the one that
+# was evaluated; the tracker below prevents that (same rule as the benchmarking script).
+make_tracker <- function(k, n, DMAT, DIST) {
+  env <- new.env()
+  env$best_sil <- -Inf; env$best_med <- NULL; env$n_eval <- 0L
+  env$eval <- function(sol) {
+    med <- decode_medoid(sol, k, n)
+    s   <- sil_of_medoids(DMAT, DIST, med)$sil
+    env$n_eval <- env$n_eval + 1L
+    if (s > env$best_sil) { env$best_sil <- s; env$best_med <- med }
+    s
+  }
+  env
+}
+
+# Check that the reported Silhouette is reproduced by the returned medoids.
+finish_run <- function(tr, DMAT, DIST, conv = NULL, algo = "") {
+  chk <- sil_of_medoids(DMAT, DIST, tr$best_med)$sil
+  if (abs(chk - tr$best_sil) > 1e-9)
+    stop(sprintf("%s: returned medoids give Silhouette %.10f, reported %.10f", algo, chk, tr$best_sil))
+  list(med = tr$best_med, sil = tr$best_sil, conv = conv, n_eval = tr$n_eval)
 }
 
 vif_calc <- function(X) {
@@ -66,67 +86,56 @@ vif_calc <- function(X) {
 run_GA <- function(k, n, DMAT, DIST, seed = 42, popSize = 50, maxiter = 100,
                    trace = FALSE, progress_fn = NULL) {
   set.seed(seed)
+  tr <- make_tracker(k, n, DMAT, DIST)
   g <- ga(
     type    = "real-valued",
-    fitness = function(sol) fitness_sil(sol, k, n, DMAT, DIST, maximize = TRUE),
+    fitness = function(sol) tr$eval(sol),
     lower   = rep(1, k), upper = rep(n, k),
     popSize = popSize, maxiter = maxiter,
     pcrossover = 0.8, pmutation = 0.1, elitism = 2,
     monitor = if (!is.null(progress_fn)) {
       function(obj) {
-        if (!is.null(progress_fn)) {
-          iter <- obj@iter
-          progress_fn(iter, maxiter, paste0("GA generation ", iter, "/", maxiter))
-        }
+        iter <- obj@iter
+        progress_fn(iter, maxiter, paste0("GA generation ", iter, "/", maxiter))
       }
     } else FALSE,
     seed = seed
   )
-  list(
-    med  = decode_medoid(as.numeric(g@solution[1, ]), k, n),
-    conv = if (trace) as.numeric(g@summary[, "max"]) else NULL,
-    sil  = max(g@summary[, "max"])
-  )
+  finish_run(tr, DMAT, DIST, conv = if (trace) cummax(as.numeric(g@summary[, "max"])) else NULL, algo = "GA")
 }
 
 run_PSO <- function(k, n, DMAT, DIST, seed = 42, s = 30, maxit = 100,
                     trace = FALSE, progress_fn = NULL) {
   set.seed(seed)
-  iter_count <- 0
-  ctrl <- list(
-    maxit = maxit, s = s, w = 0.729, c.p = 1.494, c.g = 1.494,
-    trace = if (trace) 1 else 0, trace.stats = trace, REPORT = 1
-  )
-  p <- psoptim(
+  tr <- make_tracker(k, n, DMAT, DIST)
+  conv <- numeric(0)
+  ctrl <- list(maxit = maxit, s = s, w = 0.729, c.p = 1.494, c.g = 1.494, trace = 0)
+  psoptim(
     par    = sample(seq_len(n), k),
     fn     = function(sol) {
-      iter_count <<- iter_count + 1
-      if (!is.null(progress_fn) && iter_count %% k == 0) {
-        prog_iter <- ceiling(iter_count / (s * k))
-        progress_fn(min(prog_iter, maxit), maxit,
-                    paste0("PSO iteration ~", min(prog_iter, maxit), "/", maxit))
+      v <- -tr$eval(sol)
+      if (tr$n_eval %% s == 0) {                      # one swarm sweep finished
+        conv <<- c(conv, tr$best_sil)
+        it <- length(conv)
+        if (!is.null(progress_fn)) progress_fn(min(it, maxit), maxit, paste0("PSO iteration ", min(it, maxit), "/", maxit))
       }
-      fitness_sil(sol, k, n, DMAT, DIST, maximize = FALSE)
+      v
     },
     lower  = rep(1, k), upper = rep(n, k),
     control = ctrl
   )
-  best_sil <- -p$value
-  list(
-    med  = decode_medoid(p$par, k, n),
-    conv = if (trace && !is.null(p$stats$error)) -as.numeric(p$stats$error) else NULL,
-    sil  = best_sil
-  )
+  finish_run(tr, DMAT, DIST, conv = if (trace) conv else NULL, algo = "PSO")
 }
 
 run_CSA <- function(k, n, DMAT, DIST, seed = 42, flock = 30, num_iter = 100,
                     fl = 2.0, AP = 0.1, trace = FALSE, progress_fn = NULL) {
   set.seed(seed)
-  pos     <- lapply(seq_len(flock), function(i) decode_medoid(sample(n, k), k, n))
-  memory  <- pos
-  sil_mem <- sapply(memory, function(m) sil_of_medoids(DMAT, DIST, m)$sil)
-  best    <- which.max(sil_mem)
-  best_med <- memory[[best]]; best_sil <- sil_mem[best]
+  tr <- make_tracker(k, n, DMAT, DIST)
+  memory <- pos <- vector("list", flock); sil_mem <- numeric(flock)
+  for (i in seq_len(flock)) {                          # initial flock; memory = evaluated set
+    m <- decode_medoid(sample(n, k), k, n)
+    sil_mem[i] <- tr$eval(m); memory[[i]] <- m; pos[[i]] <- m
+  }
   conv <- numeric(0)
   for (it in seq_len(num_iter)) {
     if (!is.null(progress_fn)) progress_fn(it, num_iter, paste0("CSA iteration ", it, "/", num_iter))
@@ -137,27 +146,24 @@ run_CSA <- function(k, n, DMAT, DIST, seed = 42, flock = 30, num_iter = 100,
         for (d in seq_len(k))
           new_med[d] <- if (runif(1) < fl / (fl + 1)) memory[[j]][sample(k, 1)] else pos[[i]][d]
       } else new_med <- sample(n, k)
-      new_med <- decode_medoid(new_med, k, n)
-      s <- sil_of_medoids(DMAT, DIST, new_med)$sil
+      new_med <- decode_medoid(new_med, k, n)          # decoded once; tr$eval keeps it unchanged
+      s <- tr$eval(new_med)
       pos[[i]] <- new_med
-      if (s > sil_mem[i]) {
-        memory[[i]] <- new_med; sil_mem[i] <- s
-        if (s > best_sil) { best_sil <- s; best_med <- new_med }
-      }
+      if (s > sil_mem[i]) { memory[[i]] <- new_med; sil_mem[i] <- s }
     }
-    conv <- c(conv, best_sil)
+    conv <- c(conv, tr$best_sil)
   }
-  list(med = best_med, conv = if (trace) conv else NULL, sil = best_sil)
+  finish_run(tr, DMAT, DIST, conv = if (trace) conv else NULL, algo = "CSA")
 }
 
 run_GWO <- function(k, n, DMAT, DIST, seed = 42, num_wolves = 30, num_iter = 100,
                     trace = FALSE, progress_fn = NULL) {
   set.seed(seed)
+  tr  <- make_tracker(k, n, DMAT, DIST)
   pos <- matrix(runif(num_wolves * k, 1, n), nrow = num_wolves)
-  fit <- apply(pos, 1, function(p) sil_of_medoids(DMAT, DIST, decode_medoid(p, k, n))$sil)
+  fit <- apply(pos, 1, tr$eval)
   ord <- order(fit, decreasing = TRUE)
   alpha <- pos[ord[1], ]; beta <- pos[ord[2], ]; delta <- pos[ord[3], ]
-  best_med <- decode_medoid(alpha, k, n); best_sil <- fit[ord[1]]
   conv <- numeric(0)
   for (it in seq_len(num_iter)) {
     if (!is.null(progress_fn)) progress_fn(it, num_iter, paste0("GWO iteration ", it, "/", num_iter))
@@ -174,16 +180,12 @@ run_GWO <- function(k, n, DMAT, DIST, seed = 42, num_wolves = 30, num_iter = 100
       }
       pos[i, ] <- pmin(pmax(pos[i, ], 1), n)
     }
-    fit <- apply(pos, 1, function(p) sil_of_medoids(DMAT, DIST, decode_medoid(p, k, n))$sil)
+    fit <- apply(pos, 1, tr$eval)
     ord <- order(fit, decreasing = TRUE)
     alpha <- pos[ord[1], ]; beta <- pos[ord[2], ]; delta <- pos[ord[3], ]
-    if (fit[ord[1]] > best_sil) {
-      best_sil <- fit[ord[1]]
-      best_med <- decode_medoid(alpha, k, n)
-    }
-    conv <- c(conv, best_sil)
+    conv <- c(conv, tr$best_sil)
   }
-  list(med = best_med, conv = if (trace) conv else NULL, sil = best_sil)
+  finish_run(tr, DMAT, DIST, conv = if (trace) conv else NULL, algo = "GWO")
 }
 
 run_PAM <- function(k, data_scaled, DMAT, DIST) {
@@ -197,7 +199,7 @@ run_PAM <- function(k, data_scaled, DMAT, DIST) {
 # UI
 # ─────────────────────────────────────────────────────────────────────────────
 ui <- dashboardPage(
-  skin = "blue",
+  skin = "blue", title = "Metaheuristic K-Medoids",
   dashboardHeader(title = span(icon("leaf"), " Metaheuristic K-Medoids"), titleWidth = 330),
 
   dashboardSidebar(width = 330,

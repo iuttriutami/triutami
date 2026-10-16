@@ -21,7 +21,13 @@ find_in <- function(path, pattern) {
   message("Using: ", cand[1]); cand[1]
 }
 PATH_CSV <- find_in(PATH_CSV, "Kualitas Lingkungan.*\\.csv$")
-PATH_XY  <- find_in(PATH_XY, "centroid.*\\.csv$")
+# Province coordinates: either the regency/city centroid file (PATH_XY, columns PROV_2024,
+# X_Centroid, Y_Centroid), or, if it is not available, the province coordinates derived from it
+# and distributed with the repository (results/supplementary/supp_S2_coordinates.csv).
+PATH_PROV_XY <- "results/supplementary/supp_S2_coordinates.csv"
+USE_PROV_XY  <- !file.exists(PATH_XY) && !length(list.files("/kaggle/input", pattern = "centroid.*\\.csv$", recursive = TRUE)) &&
+                file.exists(PATH_PROV_XY)
+if (!USE_PROV_XY) PATH_XY <- find_in(PATH_XY, "centroid.*\\.csv$")
 
 # ---- data (same four components as the main analysis) ----
 df <- read.csv(PATH_CSV, header = TRUE, check.names = FALSE, na.strings = c("", "NA", "-"))
@@ -37,20 +43,28 @@ stopifnot(length(prov) == 38L, !anyNA(X))
 vars <- cbind(X, Average_of_4 = rowMeans(X))
 
 # ---- locations: mean of regency/city centroids per province (2024 codes, 38 provinces) ----
-cen <- read.csv(PATH_XY, check.names = FALSE)
-norm <- function(x) { x <- toupper(trimws(gsub("\\s+", " ", x))); x <- gsub("-", " ", x)
-  x <- gsub("^KEP\\.? ", "KEPULAUAN ", x); x <- gsub("^(KEPULAUAN )?BANGKA BELITUNG$", "KEPULAUAN BANGKA BELITUNG", x)
-  x <- gsub("^YOGYAKARTA$|^(D\\.?I\\.?|DAERAH ISTIMEWA) YOGYAKARTA$", "DI YOGYAKARTA", x)
-  x <- gsub("^DAERAH KHUSUS IBUKOTA JAKARTA$|^JAKARTA RAYA$|^D\\.?K\\.?I\\.? JAKARTA$", "DKI JAKARTA", x)
-  gsub("^NANGGROE ACEH DARUSSALAM$", "ACEH", x) }
-cen$KEY <- norm(cen$PROV_2024)
-pc <- aggregate(cbind(lon = X_Centroid, lat = Y_Centroid) ~ KEY, data = cen, FUN = mean)
-key <- norm(prov)
-miss <- setdiff(key, pc$KEY)
-if (length(miss)) { print(sort(unique(pc$KEY))); stop("Not in centroid file: ", paste(miss, collapse = ", ")) }
-xy <- as.matrix(pc[match(key, pc$KEY), c("lon", "lat")]); rownames(xy) <- key
+if (USE_PROV_XY) {
+  message("Using province coordinates from ", PATH_PROV_XY)
+  pxy <- read.csv(PATH_PROV_XY, check.names = FALSE)
+  norm <- function(x) toupper(trimws(gsub("\\s+", " ", x)))
+  key <- norm(prov)
+  xy  <- as.matrix(pxy[match(key, norm(pxy$Province)), c("lon", "lat")]); rownames(xy) <- key
+} else {
+  cen <- read.csv(PATH_XY, check.names = FALSE)
+  norm <- function(x) { x <- toupper(trimws(gsub("\\s+", " ", x))); x <- gsub("-", " ", x)
+    x <- gsub("^KEP\\.? ", "KEPULAUAN ", x); x <- gsub("^(KEPULAUAN )?BANGKA BELITUNG$", "KEPULAUAN BANGKA BELITUNG", x)
+    x <- gsub("^YOGYAKARTA$|^(D\\.?I\\.?|DAERAH ISTIMEWA) YOGYAKARTA$", "DI YOGYAKARTA", x)
+    x <- gsub("^DAERAH KHUSUS IBUKOTA JAKARTA$|^JAKARTA RAYA$|^D\\.?K\\.?I\\.? JAKARTA$", "DKI JAKARTA", x)
+    gsub("^NANGGROE ACEH DARUSSALAM$", "ACEH", x) }
+  cen$KEY <- norm(cen$PROV_2024)
+  pc <- aggregate(cbind(lon = X_Centroid, lat = Y_Centroid) ~ KEY, data = cen, FUN = mean)
+  key <- norm(prov)
+  miss <- setdiff(key, pc$KEY)
+  if (length(miss)) { print(sort(unique(pc$KEY))); stop("Not in centroid file: ", paste(miss, collapse = ", ")) }
+  xy <- as.matrix(pc[match(key, pc$KEY), c("lon", "lat")]); rownames(xy) <- key
+}
 stopifnot(!anyNA(xy), nrow(xy) == 38L)
-write.csv(data.frame(Province = prov, lon = xy[, 1], lat = xy[, 2],
+if (!USE_PROV_XY) write.csv(data.frame(Province = prov, lon = xy[, 1], lat = xy[, 2],
                      n_regencies = as.integer(table(cen$KEY)[key])),
           file.path(DIR_OUT, "supp_S2_coordinates.csv"), row.names = FALSE)
 
