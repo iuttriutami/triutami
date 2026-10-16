@@ -551,6 +551,7 @@ if (HAS_SF && !is.null(shp)) tryCatch({
   main <- base + coord_sf(expand = FALSE) + labs(x = "Longitude (\u00b0E)", y = "Latitude") +
     annotate("rect", xmin = 105, xmax = 107.8, ymin = -7.3, ymax = -5.7, fill = NA, colour = "black", linewidth = 0.4) +
     theme_bw(base_size = 11) + theme(legend.position = "bottom", legend.direction = "vertical",
+                                     legend.text = element_text(size = 16), legend.key.size = grid::unit(0.8, "cm"),
                                      panel.grid = element_line(colour = "grey90", linewidth = 0.2))
   inset <- base + coord_sf(xlim = c(105, 107.8), ylim = c(-7.3, -5.7), expand = FALSE) +
     annotate("label", x = c(106.83, 106.1), y = c(-5.95, -6.65), label = c("DKI Jakarta", "Banten"), size = 2.6) +
