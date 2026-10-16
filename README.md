@@ -17,7 +17,8 @@ Code, data and results for the manuscript *“Metaheuristic-Optimized K-Medoids 
 | `results/supplementary/` | CSV outputs of S1 (EQI 2022) and S2 (Moran’s I) |
 | `figures/` | Figures used in the manuscript (PNG) |
 | `shiny/app.R` | Interactive R Shiny decision-support application (English interface) |
-| `shiny/check_shiny_decoding.R` | Test that every optimizer in the app returns the medoid set that produced the reported Silhouette |
+| `shiny/check_shiny_decoding.R` | Test that every optimizer in the app returns the medoid set that produced the reported Silhouette (stops on failure) |
+| `shiny/check_shiny_decoding_log.*` | Log of the passing test run |
 
 ## How to reproduce
 
@@ -32,7 +33,7 @@ Every run of every optimizer uses seed 42 + r (r = 1, …, 30). The fitness is t
 
 ## Run the Shiny app locally
 
-The app uses the same preprocessing, decoder and optimizers as the benchmarking script and stores each medoid set together with the Silhouette it produced (no re-decoding of the final solution). `Rscript shiny/check_shiny_decoding.R` verifies this on the 2023 data.
+The app uses the same preprocessing, decoder and optimizers as the benchmarking script and stores each medoid set together with the Silhouette it produced (no re-decoding of the final solution). `Rscript shiny/check_shiny_decoding.R` (run from the repository root) verifies this on the 2023 data: it runs GA, PSO, CSA and GWO for k = 3 and 5 with five seeds, recomputes the Silhouette from the returned medoids, stops with an error if any difference exceeds 10⁻⁹, and writes `shiny/check_shiny_decoding_log.csv` and `shiny/check_shiny_decoding_log.txt` (result, date, session info).
 
 
 ```r
